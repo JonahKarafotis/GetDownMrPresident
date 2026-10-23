@@ -23,6 +23,6 @@ Public deployment; two physical devices over internet; hosted startup/load targe
 
 ## Current blocker and next steps
 
-Owner needs to create a Cloudflare Free account. Then browser-authorize Wrangler, verify free-plan configuration, deploy, run hosted transport test, and arrange Mac/Windows gameplay. No secrets should be shared in chat. No architecture failure has been established, and no fallback is proposed yet.
+Owner confirmed a Cloudflare Free account and completed browser authorization. Deployment succeeded October 23, 2026, version f04c65e9-add4-4697-90ae-3a3b79d60354, at https://get-down-mr-president.getdownmrpresident.workers.dev . First HTTPS checks encountered TLS handshake failure immediately after workers.dev subdomain registration; repeated CLI checks and browser check still failed in this session. Deployment listing confirms 100% of traffic assigned to the deployed version. Certificate validation was not bypassed. New-domain provisioning is suspected, not proven. Hosted transport verification and Mac/Windows gameplay remain pending. No secrets should be shared in chat. No architecture failure has been established, and no fallback is proposed yet.
 
 Do not mark Milestone 1 complete from local results. Continue within its remaining budget after deployment access is available. If critical hosted criteria fail at six focused hours, stop and present the approved bounded reassessment.

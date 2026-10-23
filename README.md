@@ -42,7 +42,7 @@ Prototype settings: 60 Hz simulation, nominal 20 Hz snapshots, 60 Hz client inpu
 
 Use a Cloudflare account on Workers Free. Do not enable paid services. Authenticate via `npx wrangler login`, confirm the intended account/plan, then `npm run deploy`. This deploys static assets and one room class in the same Worker. There is no paid resource declaration in the project, but account billing configuration must still be checked before deployment.
 
-No public deployment has been made yet. Cloudflare account creation is pending with the owner. Never put credentials in source files or send them in chat.
+Cloudflare deployment created October 23, 2026: https://get-down-mr-president.getdownmrpresident.workers.dev . Hosted verification is in progress; see the feasibility report. Never put credentials in source files or send them in chat.
 
 ## Current limitations
 
