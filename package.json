@@ -1,0 +1,30 @@
+{
+  "name": "getdownmrpresident",
+  "version": "1.0.0",
+  "description": "Browser-only authoritative multiplayer feasibility prototype",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "vite build",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "npm run check && npm test && npm run build && wrangler deploy"
+  },
+  "keywords": [],
+  "author": "",
+  "type": "module",
+  "dependencies": {
+    "phaser": "^4.2.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261023.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.152.0"
+  },
+  "private": true
+}
