@@ -1,5 +1,6 @@
+import { decodeMessage } from '../shared/protocol';
 import { DurableObject } from 'cloudflare:workers';
-import { initialState, parseInput, step, DT, PROTOCOL, type Input } from '../shared/simulation';
+import { initialState, step, DT, PROTOCOL, type Input } from '../shared/simulation';
 interface Env { ROOMS: DurableObjectNamespace<GameRoom>; ASSETS: Fetcher }
 const blank = ():Input => ({seq:0,move:0,jump:false,action:false});
 export default {
@@ -10,7 +11,7 @@ export default {
         const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         const code=Array.from(crypto.getRandomValues(new Uint8Array(6)),n=>alphabet[n%32]).join('');
         const response=await env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(new Request('https://room/init',{method:'POST'}));
-        if(response.ok) return Response.json({code});
+        if(response.ok) return Response.json({code},{headers:{'Server-Timing':response.headers.get('Server-Timing')??''}});
       }
       return new Response('Try again',{status:503});
     }
@@ -24,18 +25,21 @@ export class GameRoom extends DurableObject<Env> {
   state=initialState();
   sockets: (WebSocket|null)[]=[null,null];
   inputs=[blank(),blank()];
-  lastInput=[0,0]; lastSeen=[0,0];
+  lastInput=[0,0]; lastSeen=[0,0]; verified=[false,false];
   timer: ReturnType<typeof setInterval>|undefined;
   running=false; epoch=crypto.randomUUID();
-  accumulator=0; previous=0; incoming=0; outgoingBytes=0; simulationMs=0; ticks=0;
+  accumulator=0; previous=0; incoming=0; outgoingBytes=0; simulationMs=0; ticks=0; lastSnapshotTick=0;
   constructor(ctx:DurableObjectState,env:Env){super(ctx,env);}
   async fetch(request:Request) {
     if(new URL(request.url).pathname==='/init') {
       return await this.ctx.blockConcurrencyWhile(async()=>{
+        const at=Date.now();
         if(await this.ctx.storage.get('created'))return new Response('Conflict',{status:409});
+        const read=Date.now();
         await this.ctx.storage.put('created',Date.now());
+        const wrote=Date.now();
         await this.ctx.storage.setAlarm(Date.now()+30*60*1000);
-        return new Response('Created');
+        return new Response('Created',{headers:{'Server-Timing':`read;dur=${read-at}, write;dur=${wrote-read}, alarm;dur=${Date.now()-wrote}`}});
       });
     }
     if(!await this.ctx.storage.get('created'))return new Response('Room not found',{status:404});
@@ -47,35 +51,37 @@ export class GameRoom extends DurableObject<Env> {
     const pair=new WebSocketPair(),client=pair[0],socket=pair[1];
     socket.accept();this.sockets[slot]=socket;
     this.lastSeen[slot]=performance.now();this.lastInput[slot]=0;
-    let verified=false, count=0, windowStart=performance.now();
+    let count=0, invalid=0, windowStart=performance.now();
     socket.addEventListener('message',event=>{
       const now=performance.now();
-      if(now-windowStart>1000){windowStart=now;count=0;}
+      if(now-windowStart>1000){windowStart=now;count=0;invalid=0;}
       if(++count>180 || typeof event.data!=='string' || event.data.length>2048){socket.close(1008,'Message limit');return;}
       this.incoming++;
       try {
-        const m=JSON.parse(event.data);
+        const m=decodeMessage(event.data);
+        if(!m){if(++invalid>10)socket.close(1008,'Invalid messages');return;}
+        if(this.sockets[slot]!==socket)return;
         if(m.type==='hello') {
           if(m.version!==PROTOCOL){socket.close(1008,'Game updated — refresh to continue');return;}
-          verified=true;this.send(socket,{type:'welcome',slot,epoch:this.epoch});this.broadcast();return;
+          this.verified[slot]=true;this.send(socket,{type:'welcome',slot,epoch:this.epoch});this.broadcast();return;
         }
-        if(!verified)return;
+        if(!this.verified[slot])return;
         this.lastSeen[slot]=now;
         if(m.type==='ping'){this.send(socket,{type:'pong',sent:m.sent});return;}
         if(m.type==='input' && this.running && m.epoch===this.epoch) {
-          const input=parseInput(m.input);
+          const input=m.input;
           if(input && input.seq>this.inputs[slot].seq){
             // Fold action edges until next simulation tick; held input uses newest sample.
             input.jump ||= this.inputs[slot].jump; input.action ||= this.inputs[slot].action;
             this.inputs[slot]=input;this.lastInput[slot]=now;
           }
         }
-        if(m.type==='start' && this.sockets.every(Boolean))this.start();
+        if(m.type==='start' && this.sockets.every(Boolean) && this.verified.every(Boolean))this.start();
       } catch { /* Invalid messages never mutate simulation state. */ }
     });
     const disconnect=()=>{
       if(this.sockets[slot]!==socket)return;
-      this.sockets[slot]=null;this.stop();this.state=initialState();this.epoch=crypto.randomUUID();this.broadcast();
+      this.sockets[slot]=null;this.verified[slot]=false;this.stop();this.state=initialState();this.epoch=crypto.randomUUID();this.broadcast();
       if(this.sockets.every(s=>!s))void this.ctx.storage.setAlarm(Date.now()+30*60*1000);
     };
     socket.addEventListener('close',disconnect);socket.addEventListener('error',disconnect);
@@ -85,7 +91,7 @@ export class GameRoom extends DurableObject<Env> {
   start(){
     if(this.running)return;
     this.state=initialState();this.epoch=crypto.randomUUID();this.inputs=[blank(),blank()];
-    this.running=true;this.previous=performance.now();this.accumulator=0;this.broadcast();
+    this.lastSnapshotTick=0;this.running=true;this.previous=performance.now();this.accumulator=0;this.broadcast();
     this.timer=setInterval(()=>this.tick(),1000/60);
   }
   stop(){if(this.timer)clearInterval(this.timer);this.timer=undefined;this.running=false;}
@@ -103,10 +109,10 @@ export class GameRoom extends DurableObject<Env> {
       }
       this.simulationMs+=performance.now()-begin;
       if(events.length)this.publish({type:'events',epoch:this.epoch,events});
-      if(this.state.tick%3===0)this.broadcast();
+      if(this.state.tick-this.lastSnapshotTick>=3){this.lastSnapshotTick=this.state.tick;this.broadcast();}
     } catch {this.stop();this.publish({type:'error',message:'Simulation interrupted. Start a fresh test.'});}
   }
-  send(s:WebSocket,data:unknown){const message=JSON.stringify(data);try{s.send(message);this.outgoingBytes+=message.length;}catch{/* close handler cleans up */}}
+  send(s:WebSocket,data:unknown){const message=JSON.stringify(data);try{s.send(message);this.outgoingBytes+=new TextEncoder().encode(message).byteLength;}catch{/* close handler cleans up */}}
   publish(data:unknown){this.sockets.forEach(s=>{if(s)this.send(s,data);});}
   broadcast(){this.publish({type:'snapshot',epoch:this.epoch,running:this.running,connected:this.sockets.map(Boolean),state:this.state,metrics:{incoming:this.incoming,outgoingBytes:this.outgoingBytes,simulationMs:this.simulationMs,ticks:this.ticks}});}
   async alarm(){if(this.sockets.some(Boolean))return;this.stop();await this.ctx.storage.deleteAll();}

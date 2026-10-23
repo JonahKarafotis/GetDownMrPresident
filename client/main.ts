@@ -4,12 +4,14 @@ import {DT,FLOOR,PROTOCOL,initialState,stepPlayer,dimensions,president,type Stat
 const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
 let socket:WebSocket|null=null, slot=-1, epoch='', running=false, state:State=initialState();
 let predicted:Player|null=null, sequence=0, pending:Input[]=[], accumulator=0, rtt=0;
+let menuReadyMs=0;
 let received=performance.now(), totalEvents=0, blockCount=0, hitCount=0;
 let connected=[false,false];
 const seen=new Set<number>();
 const effects:{x:number;y:number;color:number;life:number}[]=[];
 const status=(text:string)=>{el('status').textContent=text;};
 let bufferedJump=false, bufferedAction=false;
+let lastSentMove=0, inputStepsSinceSend=0;
 const drawnTomatoes=new Map<number,{x:number;y:number}>();
 class Arena extends Phaser.Scene {
   graphics!:Phaser.GameObjects.Graphics; labels!:Phaser.GameObjects.Text; keys!:Record<string,Phaser.Input.Keyboard.Key>;
@@ -17,6 +19,7 @@ class Arena extends Phaser.Scene {
   create(){
     this.graphics=this.add.graphics();
     this.labels=this.add.text(24,22,'',{fontFamily:'monospace',fontSize:'20px',color:'#f3e9cc'});
+    menuReadyMs=performance.now();el('metrics').textContent=`Interactive arena ready in ${menuReadyMs.toFixed(0)} ms`;
     this.keys=this.input.keyboard!.addKeys('A,D,LEFT,RIGHT,SPACE,J') as typeof this.keys;
     this.input.keyboard!.addCapture(['SPACE','LEFT','RIGHT']);
     window.addEventListener('blur',()=>this.release());
@@ -34,7 +37,10 @@ class Arena extends Phaser.Scene {
         const left=focused&&(this.keys.A.isDown||this.keys.LEFT.isDown),right=focused&&(this.keys.D.isDown||this.keys.RIGHT.isDown);
         const input:Input={seq:++sequence,move:left===right?0:left?-1:1,jump:bufferedJump,action:bufferedAction};bufferedJump=false;bufferedAction=false;
         stepPlayer(predicted,input);pending.push(input);if(pending.length>120)pending.shift();
-        socket.send(JSON.stringify({type:'input',epoch,input}));
+        // 15 Hz idle/held updates; transitions and action edges are immediate.
+        if(++inputStepsSinceSend>=4 || input.move!==lastSentMove || input.jump || input.action){
+          socket.send(JSON.stringify({type:'input',epoch,input}));lastSentMove=input.move;inputStepsSinceSend=0;
+        }
       }
     }
     const g=this.graphics;g.clear();g.fillStyle(0x192d46);g.fillRect(0,0,1280,720);
@@ -73,7 +79,7 @@ async function join(code:string){
       if(slot>=0){predicted=structuredClone(state.players[slot]);pending=pending.filter(i=>i.seq>predicted!.ack);for(const input of pending)stepPlayer(predicted!,input);}
       if(!running)status(connected.every(Boolean)?'Both players connected. Start the interception test.':'Waiting for the other player. Share the invite link.');
       else status('Test active — move, jump, throw, and dive. Server confirms all impacts.');
-      el('metrics').textContent=`RTT ${rtt.toFixed(0)} ms · tick ${state.tick} · confirmed events ${totalEvents} · server simulation ${m.metrics.simulationMs.toFixed(1)} ms total · sent ${(m.metrics.outgoingBytes/1024).toFixed(1)} KB`;
+      el('metrics').textContent=`Ready ${menuReadyMs.toFixed(0)} ms · RTT ${rtt.toFixed(0)} ms · tick ${state.tick} · confirmed events ${totalEvents} · server steps ${m.metrics.ticks} · sent ${(m.metrics.outgoingBytes/1024).toFixed(1)} KB`;
     }
     if(m.type==='events'&&m.epoch===epoch)for(const event of m.events){if(seen.has(event.id))continue;seen.add(event.id);totalEvents++;if(event.kind==='block')blockCount++;else hitCount++;effects.push({x:event.x,y:event.y,color:event.kind==='block'?0x70d6cf:0xff514d,life:350});}
     if(m.type==='error')status(m.message);

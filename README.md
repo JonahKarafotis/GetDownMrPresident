@@ -36,13 +36,13 @@ The smoke test creates two scripted WebSocket clients, verifies identical block 
 - `tests/`: simulation tests and transport smoke test.
 - `docs/`: evidence, limitations, and time accounting.
 
-Prototype settings: 60 Hz simulation, nominal 20 Hz snapshots, 60 Hz client inputs, 2-second ping. These are starting values, not accepted production performance guarantees. No Phaser physics runs on the server.
+Prototype settings: 60 Hz simulation, nominal 20 Hz snapshots, 15 Hz routine client inputs plus immediate transitions/actions, 2-second ping. These are starting values, not accepted production performance guarantees. No Phaser physics runs on the server.
 
 ## Deploy after account setup
 
 Use a Cloudflare account on Workers Free. Do not enable paid services. Authenticate via `npx wrangler login`, confirm the intended account/plan, then `npm run deploy`. This deploys static assets and one room class in the same Worker. There is no paid resource declaration in the project, but account billing configuration must still be checked before deployment.
 
-Cloudflare deployment created October 23, 2026: https://get-down-mr-president.getdownmrpresident.workers.dev . Hosted verification is in progress; see the feasibility report. Never put credentials in source files or send them in chat.
+Cloudflare deployment created October 23, 2026: https://get-down-mr-president.getdownmrpresident.workers.dev . The deployed two-scripted-client transport test passes. Actual two-device gameplay and performance verification remain pending; see the feasibility report. Never put credentials in source files or send them in chat.
 
 ## Current limitations
 
